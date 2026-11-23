@@ -632,15 +632,19 @@
             const text = el.innerText || '';
             if (!text.includes('[表情:')) return;
 
-            const standaloneMatch = text.trim().match(/^\[表情:\s*([^\]]+)\]$/);
-            if (standaloneMatch) {
-                const name = standaloneMatch[1].trim();
-                const src = memeMap[name];
-                if (src) {
+            const withoutMemes = text.replace(/\[表情:\s*([^\]]+)\]/g, '').trim();
+            if (!withoutMemes) {
+                const matches = [...text.matchAll(/\[表情:\s*([^\]]+)\]/g)];
+                const validNames = matches.map(m => m[1].trim()).filter(name => memeMap[name]);
+                if (validNames.length === matches.length && validNames.length > 0) {
                     el.dataset.agMemeRendered = 'true';
+                    const size = validNames.length === 1 ? 120 : 96;
+                    const imgsHtml = validNames.map(name =>
+                        `<img src="${memeMap[name]}" style="width:${size}px; height:${size}px; object-fit:contain; filter:drop-shadow(0 4px 8px rgba(0,0,0,0.3));" alt="${name}" title="[表情: ${name}]" />`
+                    ).join('');
                     el.innerHTML = `
-                        <div class="ag-standalone-bubble-meme" style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:2px;">
-                            <img src="${src}" style="width:108px; height:108px; object-fit:contain; filter:drop-shadow(0 4px 8px rgba(0,0,0,0.3));" alt="${name}" title="[表情: ${name}]" />
+                        <div class="ag-standalone-bubble-meme" style="display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-start; gap:6px; padding:2px;">
+                            ${imgsHtml}
                         </div>
                     `;
                     return;
@@ -654,7 +658,7 @@
                     const src = memeMap[name];
                     if (src) {
                         replaced = true;
-                        return `<img src="${src}" style="display:inline-block; width:26px; height:26px; vertical-align:-6px; margin:0 3px; object-fit:contain;" alt="${name}" title="${match}" />`;
+                        return `<img src="${src}" style="display:inline-block; width:52px; height:52px; vertical-align:middle; margin:0 4px; object-fit:contain; filter:drop-shadow(0 2px 4px rgba(0,0,0,0.22));" alt="${name}" title="${match}" />`;
                     }
                     return match;
                 });
