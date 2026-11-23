@@ -1,0 +1,7 @@
+# Antigravity Meme Picker Build & Ignore Rules
+node_modules/
+dist/*.tmp
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
