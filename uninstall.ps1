@@ -45,8 +45,22 @@ if ($existing.Contains($legacyStartTag) -and $existing.Contains($legacyEndTag)) 
 }
 
 if ($changed) {
-    [System.IO.File]::WriteAllText($targetJs, $existing, [System.Text.Encoding]::UTF8)
-    Write-Host "[+] 卸载完成，已清理注入代码。" -ForegroundColor Green
+    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    $backupPath = "$targetJs.bak.$timestamp"
+    Copy-Item -Path $targetJs -Destination $backupPath -Force
+    Write-Host "[+] 已生成卸载前备份: $backupPath" -ForegroundColor DarkGray
+    try {
+        [System.IO.File]::WriteAllText($targetJs, $existing, [System.Text.Encoding]::UTF8)
+        Write-Host "[+] 卸载完成，已清理注入代码。" -ForegroundColor Green
+    } catch {
+        Write-Host "[X] 卸载写入失败: $_" -ForegroundColor Red
+        if (Test-Path $backupPath) {
+            Copy-Item -Path $backupPath -Destination $targetJs -Force
+            Write-Host "[!] 已从备份自动回滚恢复: $targetJs" -ForegroundColor Yellow
+        }
+        pause
+        exit 1
+    }
 } else {
     Write-Host "[!] 未检测到当前文件中有安装标记。" -ForegroundColor Yellow
 }

@@ -54,7 +54,16 @@ for fn in files:
 
 print(f"Loaded {len(memes)} preset memes.")
 
-# 2. 读取 core.js
+# 2. 读取版本号与 core.js
+pkg_path = os.path.join(BASE_DIR, "package.json")
+version = "1.0.2"
+if os.path.exists(pkg_path):
+    try:
+        with open(pkg_path, "r", encoding="utf-8") as f:
+            version = json.load(f).get("version", version)
+    except Exception:
+        pass
+
 if os.path.exists(SRC_CORE):
     with open(SRC_CORE, "r", encoding="utf-8") as f:
         core_code = f.read()
@@ -62,7 +71,7 @@ else:
     core_code = "// core.js missing"
 
 # 3. 合并打包
-bundle_code = f"""// Antigravity Meme Picker Bundle v1.0.0
+bundle_code = f"""// Antigravity Meme Picker Bundle v{version}
 // Universal Sticker Drawer & Chat Meme Renderer for Google Antigravity
 (() => {{
     window.__DEFAULT_PRESET_MEMES = {json.dumps(memes, ensure_ascii=False)};

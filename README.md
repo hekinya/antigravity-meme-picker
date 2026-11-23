@@ -2,6 +2,11 @@
 
 > ✨ 为 Google Antigravity 打造的原生聊天表情包抽屉与自定义图库扩展。
 
+<p align="center">
+  <img src="assets/screenshots/picker_preview.png" alt="表情包抽屉预览" width="46%" />
+  <img src="assets/screenshots/sticker_preview.png" alt="聊天贴纸渲染预览" width="46%" />
+</p>
+
 ---
 
 ## 🌟 特性一览
@@ -56,12 +61,23 @@ antigravity-meme-picker/
 ```
 
 如果你想更改默认内置表情包：
-1. 将你的表情图片放入 `assets/presets/default/` 目录下（推荐命名规则如 `01-开心.png`、`02-点赞.png`）。
-2. 执行构建脚本：
+1. 安装 Python 构建依赖：
+   ```bash
+   pip install -r requirements.txt
+   ```
+2. 将你的表情图片放入 `assets/presets/default/` 目录下（推荐命名规则如 `01-开心.png`、`02-点赞.png`）。
+3. 执行构建脚本：
    ```bash
    python build.py
    ```
-3. 运行 `install.bat` 更新客户端注入代码即可。
+4. 运行 `install.bat` 更新客户端注入代码即可（脚本会在修改 `current.js` 前自动生成带时间戳的备份）。
+
+---
+
+## ⚠️ 工作原理与注意事项
+
+- **文本标记渲染机制**：点击表情发送的实际是 `[表情: 名称]` 文本标记，再由本扩展在本地界面中将其渲染为贴纸图片。这意味着**大语言模型本身接收到的是文本标记而非真实多模态图片**；同时，在未安装本扩展的设备或客户端上，消息会直接显示为 `[表情: 名称]` 文本。
+- **客户端界面注入**：本扩展通过注入 Antigravity 客户端的 `custom-theme/current.js` 实现界面增强，而非官方插件市场接口。安装和卸载脚本均会在修改 `current.js` 前自动创建 `.bak.<时间戳>` 备份，并在写入异常时自动回滚。
 
 ---
 

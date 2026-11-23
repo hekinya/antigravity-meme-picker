@@ -57,8 +57,13 @@ if (-not $targetJs) {
 Write-Host "[+] 找到目标脚本: $targetJs" -ForegroundColor Green
 
 $existing = ""
+$backupPath = $null
 if (Test-Path $targetJs) {
     $existing = Get-Content -Path $targetJs -Raw -Encoding UTF8
+    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    $backupPath = "$targetJs.bak.$timestamp"
+    Copy-Item -Path $targetJs -Destination $backupPath -Force
+    Write-Host "[+] 已生成备份文件: $backupPath" -ForegroundColor DarkGray
 }
 
 $legacyStartTag = "// === CASEY MEME INJECTOR START ==="
@@ -82,7 +87,17 @@ if ($existing.Contains($startTag) -and $existing.Contains($endTag)) {
     Write-Host "[+] 成功注入表情包核心引擎。" -ForegroundColor Green
 }
 
-[System.IO.File]::WriteAllText($targetJs, $newContent, [System.Text.Encoding]::UTF8)
+try {
+    [System.IO.File]::WriteAllText($targetJs, $newContent, [System.Text.Encoding]::UTF8)
+} catch {
+    Write-Host "[X] 写入目标文件失败: $_" -ForegroundColor Red
+    if ($backupPath -and (Test-Path $backupPath)) {
+        Copy-Item -Path $backupPath -Destination $targetJs -Force
+        Write-Host "[!] 已从备份自动回滚恢复: $targetJs" -ForegroundColor Yellow
+    }
+    pause
+    exit 1
+}
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  安装成功！请刷新或重启 Antigravity 客户端  " -ForegroundColor Green

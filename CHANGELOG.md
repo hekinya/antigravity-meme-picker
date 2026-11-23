@@ -2,6 +2,22 @@
 
 本项目遵循语义化版本规范记录所有重要变更。
 
+## [v1.0.2] - 2026-11-23
+
+### 🛡️ 稳定性与安全性重构
+- **安装/卸载自动备份与回滚**：`install.ps1` 与 `uninstall.ps1` 在修改 `current.js` 前自动生成 `.bak.<时间戳>` 备份文件，写入异常时自动回滚还原，避免损坏宿主客户端启动文件。
+- **图片压缩与存储升级**：自定义导入图片自动经 Canvas 缩放至最大 `160px` 并压缩为 WebP，同时将图库存储升级为 **IndexedDB**（首次启动自动迁移并清理旧版 `localStorage` 数据），彻底告别 5MB 容量上限溢出。
+- **导入边界容错**：修复选中包含非图片文件或损坏图片时 `loaded === files.length` 导致导入挂起的边界 Bug，改用预过滤 + `Promise.allSettled` 容错处理。
+- **DOM 增量扫描**：移除每秒全量轮询 `setInterval`，改为 `MutationObserver` + `requestAnimationFrame` 仅针对新增 DOM 子树增量渲染。
+- **安全 DOM 构建**：移除卡片渲染、空状态和图文混排中的 `innerHTML` 字符串拼接，改用 `document.createElement`、`textContent` 及 `TreeWalker` 文本节点替换，消除文件名 XSS 风险。
+
+### 📦 工程化完善
+- 新增标准 MIT `LICENSE` 与 `requirements.txt`（`Pillow>=10.0.0`）。
+- 统一同步 `package.json`、`build.py` 打包头注释与 `CHANGELOG.md` 版本号至 `v1.0.2`。
+- 更新 `README.md`，嵌入 `picker_preview.png` / `sticker_preview.png` 预览图并补充文本标记渲染与客户端注入原理说明。
+
+---
+
 ## [v1.0.1] - 2026-11-23
 
 ### ✨ 功能与体验优化

@@ -6,8 +6,14 @@
     window.__antigravityMemeSystemLoaded = true;
 
     const DEFAULT_MEMES = window.__DEFAULT_PRESET_MEMES || [];
+    const IDB_NAME = 'ag_meme_picker_db';
+    const IDB_STORE = 'custom_memes';
+    const IDB_KEY = 'meme_list';
 
-    function getCustomMemes() {
+    let customMemesCache = readLegacyLocalStorage();
+    let idbReady = false;
+
+    function readLegacyLocalStorage() {
         try {
             const raw = localStorage.getItem('ag_custom_memes');
             return raw ? JSON.parse(raw) : [];
@@ -16,11 +22,75 @@
         }
     }
 
-    function saveCustomMemes(list) {
+    function openMemeDB() {
+        return new Promise((resolve, reject) => {
+            if (!window.indexedDB) {
+                reject(new Error('IndexedDB unavailable'));
+                return;
+            }
+            const req = indexedDB.open(IDB_NAME, 1);
+            req.onupgradeneeded = (e) => {
+                const db = e.target.result;
+                if (!db.objectStoreNames.contains(IDB_STORE)) {
+                    db.createObjectStore(IDB_STORE);
+                }
+            };
+            req.onsuccess = (e) => resolve(e.target.result);
+            req.onerror = () => reject(req.error);
+        });
+    }
+
+    async function initCustomMemesStorage() {
         try {
-            localStorage.setItem('ag_custom_memes', JSON.stringify(list));
+            const db = await openMemeDB();
+            const list = await new Promise((resolve, reject) => {
+                const tx = db.transaction(IDB_STORE, 'readonly');
+                const store = tx.objectStore(IDB_STORE);
+                const getReq = store.get(IDB_KEY);
+                getReq.onsuccess = () => resolve(getReq.result);
+                getReq.onerror = () => reject(getReq.error);
+            });
+
+            if (Array.isArray(list)) {
+                customMemesCache = list;
+            } else if (customMemesCache.length > 0) {
+                // Migrate legacy localStorage data to IndexedDB
+                await persistToIDB(customMemesCache);
+                try { localStorage.removeItem('ag_custom_memes'); } catch (_) {}
+            }
+            idbReady = true;
         } catch (e) {
-            console.error('[MemePicker] Save error:', e);
+            console.warn('[MemePicker] IndexedDB fallback to memory/localStorage:', e);
+        }
+    }
+
+    async function persistToIDB(list) {
+        const db = await openMemeDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(IDB_STORE, 'readwrite');
+            const store = tx.objectStore(IDB_STORE);
+            const putReq = store.put(list, IDB_KEY);
+            putReq.onsuccess = () => resolve();
+            putReq.onerror = () => reject(putReq.error);
+        });
+    }
+
+    function getCustomMemes() {
+        return customMemesCache;
+    }
+
+    function saveCustomMemes(list) {
+        customMemesCache = list;
+        if (idbReady || window.indexedDB) {
+            persistToIDB(list).catch((e) => {
+                console.error('[MemePicker] IndexedDB save error:', e);
+            });
+        } else {
+            try {
+                localStorage.setItem('ag_custom_memes', JSON.stringify(list));
+            } catch (e) {
+                console.error('[MemePicker] localStorage save error:', e);
+            }
         }
     }
 
@@ -398,32 +468,77 @@
         }
     }
 
-    function handleImportFiles(files) {
-        if (!files || !files.length) return;
-        const customList = getCustomMemes();
-        let loaded = 0;
-
-        Array.from(files).forEach(file => {
-            if (!file.type.startsWith('image/')) return;
-            const name = file.name.replace(/\.[^/.]+$/, "");
+    function compressImageFile(file, maxSize = 160) {
+        return new Promise((resolve, reject) => {
             const reader = new FileReader();
+            reader.onerror = () => reject(new Error('File read failed'));
             reader.onload = (e) => {
-                const dataUri = e.target.result;
-                customList.push({
+                const rawUrl = e.target.result;
+                // Keep animated GIF as-is if reasonably small, otherwise canvas-compress static images to WebP
+                if (file.type === 'image/gif' && file.size <= 512 * 1024) {
+                    resolve(rawUrl);
+                    return;
+                }
+                const img = new Image();
+                img.onerror = () => reject(new Error('Image decode failed'));
+                img.onload = () => {
+                    let w = img.naturalWidth || img.width;
+                    let h = img.naturalHeight || img.height;
+                    if (!w || !h) {
+                        resolve(rawUrl);
+                        return;
+                    }
+                    if (w > maxSize || h > maxSize) {
+                        const scale = maxSize / Math.max(w, h);
+                        w = Math.max(1, Math.round(w * scale));
+                        h = Math.max(1, Math.round(h * scale));
+                    }
+                    const canvas = document.createElement('canvas');
+                    canvas.width = w;
+                    canvas.height = h;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, w, h);
+                    const compressed = canvas.toDataURL('image/webp', 0.82);
+                    resolve(compressed.startsWith('data:image/webp') ? compressed : canvas.toDataURL('image/png'));
+                };
+                img.src = rawUrl;
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+
+    async function handleImportFiles(files) {
+        if (!files || !files.length) return;
+        const imageFiles = Array.from(files).filter(f => f.type && f.type.startsWith('image/'));
+        if (!imageFiles.length) return;
+
+        const customList = [...getCustomMemes()];
+        const results = await Promise.allSettled(
+            imageFiles.map(async (file) => {
+                const name = file.name.replace(/\.[^/.]+$/, '') || 'sticker';
+                const dataUri = await compressImageFile(file, 160);
+                return {
                     id: 'c_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
                     name: name,
                     tag: `[表情: ${name}]`,
                     preview: dataUri
-                });
-                loaded++;
-                if (loaded === files.length) {
-                    saveCustomMemes(customList);
-                    currentPack = 'custom';
-                    renderPickerContent();
-                }
-            };
-            reader.readAsDataURL(file);
+                };
+            })
+        );
+
+        let added = 0;
+        results.forEach(res => {
+            if (res.status === 'fulfilled' && res.value) {
+                customList.push(res.value);
+                added++;
+            }
         });
+
+        if (added > 0) {
+            saveCustomMemes(customList);
+            currentPack = 'custom';
+            renderPickerContent();
+        }
     }
 
     function renderPickerContent() {
@@ -437,22 +552,24 @@
 
         const counterEl = pickerEl.querySelector('.ag-meme-counter');
         if (counterEl) {
-            counterEl.innerText = `共 ${filtered.length} 张`;
+            counterEl.textContent = `共 ${filtered.length} 张`;
         }
 
         const gridContainer = pickerEl.querySelector('.ag-meme-grid-viewport');
         if (!gridContainer) return;
 
+        gridContainer.replaceChildren();
+
         if (filtered.length === 0) {
-            gridContainer.innerHTML = `
-                <div class="ag-meme-empty">
-                    <span>${searchQuery ? '未找到相关表情' : '该图库暂无表情，可点击右上角导入'}</span>
-                </div>
-            `;
+            const emptyBox = document.createElement('div');
+            emptyBox.className = 'ag-meme-empty';
+            const emptyText = document.createElement('span');
+            emptyText.textContent = searchQuery ? '未找到相关表情' : '该图库暂无表情，可点击右上角导入';
+            emptyBox.appendChild(emptyText);
+            gridContainer.appendChild(emptyBox);
             return;
         }
 
-        gridContainer.innerHTML = '';
         const grid = document.createElement('div');
         grid.className = 'ag-meme-grid';
 
@@ -460,27 +577,32 @@
             const card = document.createElement('div');
             card.className = 'ag-meme-card';
             card.title = `${meme.name} (点击发送，Shift+点击插入)`;
-            card.innerHTML = `
-                <img src="${meme.preview}" alt="${meme.name}" loading="lazy" />
-                ${currentPack === 'custom' ? '<button class="ag-meme-card-delete" title="删除此表情">✕</button>' : ''}
-            `;
+
+            const img = document.createElement('img');
+            img.src = meme.preview;
+            img.alt = meme.name;
+            img.loading = 'lazy';
+            card.appendChild(img);
+
+            if (currentPack === 'custom') {
+                const delBtn = document.createElement('button');
+                delBtn.type = 'button';
+                delBtn.className = 'ag-meme-card-delete';
+                delBtn.title = '删除此表情';
+                delBtn.textContent = '✕';
+                delBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    const list = getCustomMemes().filter(x => x.id !== meme.id);
+                    saveCustomMemes(list);
+                    renderPickerContent();
+                };
+                card.appendChild(delBtn);
+            }
 
             card.addEventListener('click', (e) => {
                 if (e.target.classList.contains('ag-meme-card-delete')) return;
                 handleMemeSelect(meme, e.shiftKey);
             });
-
-            if (currentPack === 'custom') {
-                const delBtn = card.querySelector('.ag-meme-card-delete');
-                if (delBtn) {
-                    delBtn.onclick = (e) => {
-                        e.stopPropagation();
-                        const list = getCustomMemes().filter(x => x.id !== meme.id);
-                        saveCustomMemes(list);
-                        renderPickerContent();
-                    };
-                }
-            }
 
             grid.appendChild(card);
         });
@@ -597,7 +719,79 @@
         addBtn.parentElement.insertBefore(btn, addBtn.nextSibling);
     }
 
-    function renderChatMemes() {
+    function collectMatchingElements(root, selector) {
+        const list = [];
+        if (root.matches && root.matches(selector)) {
+            list.push(root);
+        }
+        if (root.querySelectorAll) {
+            root.querySelectorAll(selector).forEach(el => list.push(el));
+        }
+        return list;
+    }
+
+    function createStickerImg(src, name, size, isInline) {
+        const img = document.createElement('img');
+        img.src = src;
+        img.alt = name;
+        img.title = `[表情: ${name}]`;
+        if (isInline) {
+            img.style.cssText = 'display:inline-block; width:52px; height:52px; vertical-align:middle; margin:0 4px; object-fit:contain; filter:drop-shadow(0 2px 4px rgba(0,0,0,0.22));';
+        } else {
+            img.style.cssText = `width:${size}px; height:${size}px; object-fit:contain; filter:drop-shadow(0 4px 8px rgba(0,0,0,0.3));`;
+        }
+        return img;
+    }
+
+    function replaceInlineMemesInElement(el, memeMap) {
+        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+        const textNodes = [];
+        let node;
+        while ((node = walker.nextNode())) {
+            if (node.nodeValue && node.nodeValue.includes('[表情:')) {
+                textNodes.push(node);
+            }
+        }
+
+        let replacedAny = false;
+        const tagRegex = /\[表情:\s*([^\]]+)\]/g;
+
+        textNodes.forEach(textNode => {
+            const val = textNode.nodeValue;
+            tagRegex.lastIndex = 0;
+            let match;
+            let lastIdx = 0;
+            const frag = document.createDocumentFragment();
+            let nodeReplaced = false;
+
+            while ((match = tagRegex.exec(val)) !== null) {
+                const name = match[1].trim();
+                const src = memeMap[name];
+                if (!src) continue;
+
+                if (match.index > lastIdx) {
+                    frag.appendChild(document.createTextNode(val.slice(lastIdx, match.index)));
+                }
+                frag.appendChild(createStickerImg(src, name, 52, true));
+                lastIdx = match.index + match[0].length;
+                nodeReplaced = true;
+                replacedAny = true;
+            }
+
+            if (nodeReplaced) {
+                if (lastIdx < val.length) {
+                    frag.appendChild(document.createTextNode(val.slice(lastIdx)));
+                }
+                if (textNode.parentNode) {
+                    textNode.parentNode.replaceChild(frag, textNode);
+                }
+            }
+        });
+
+        return replacedAny;
+    }
+
+    function renderChatMemes(rootEl = document) {
         const defaultMemes = window.__DEFAULT_PRESET_MEMES || [];
         const customMemes = getCustomMemes();
         const allMemes = [...defaultMemes, ...customMemes];
@@ -610,7 +804,7 @@
             memeNames.add(m.name);
         });
 
-        document.querySelectorAll('[class*="group/media"]').forEach(mediaEl => {
+        collectMatchingElements(rootEl, '[class*="group/media"]').forEach(mediaEl => {
             if (mediaEl.classList.contains('ag-chat-sticker')) return;
             const img = mediaEl.querySelector('img[alt]');
             if (!img) return;
@@ -620,10 +814,10 @@
             }
         });
 
-        const nodes = document.querySelectorAll('[data-testid="user-message-content"] .whitespace-pre-wrap, .whitespace-pre-wrap');
+        const nodes = collectMatchingElements(rootEl, '.whitespace-pre-wrap');
         nodes.forEach(el => {
             if (el.dataset.agMemeRendered) return;
-            const text = el.innerText || '';
+            const text = el.textContent || '';
             if (!text.includes('[表情:')) return;
 
             const withoutMemes = text.replace(/\[表情:\s*([^\]]+)\]/g, '').trim();
@@ -633,33 +827,19 @@
                 if (validNames.length === matches.length && validNames.length > 0) {
                     el.dataset.agMemeRendered = 'true';
                     const size = validNames.length === 1 ? 120 : 96;
-                    const imgsHtml = validNames.map(name =>
-                        `<img src="${memeMap[name]}" style="width:${size}px; height:${size}px; object-fit:contain; filter:drop-shadow(0 4px 8px rgba(0,0,0,0.3));" alt="${name}" title="[表情: ${name}]" />`
-                    ).join('');
-                    el.innerHTML = `
-                        <div class="ag-standalone-bubble-meme" style="display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-start; gap:6px; padding:2px;">
-                            ${imgsHtml}
-                        </div>
-                    `;
+                    const container = document.createElement('div');
+                    container.className = 'ag-standalone-bubble-meme';
+                    container.style.cssText = 'display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-start; gap:6px; padding:2px;';
+                    validNames.forEach(name => {
+                        container.appendChild(createStickerImg(memeMap[name], name, size, false));
+                    });
+                    el.replaceChildren(container);
                     return;
                 }
             }
 
-            if (/\[表情:\s*[^\]]+\]/.test(text)) {
-                let replaced = false;
-                const newHtml = el.innerHTML.replace(/\[表情:\s*([^\]]+)\]/g, (match, p1) => {
-                    const name = p1.trim();
-                    const src = memeMap[name];
-                    if (src) {
-                        replaced = true;
-                        return `<img src="${src}" style="display:inline-block; width:52px; height:52px; vertical-align:middle; margin:0 4px; object-fit:contain; filter:drop-shadow(0 2px 4px rgba(0,0,0,0.22));" alt="${name}" title="${match}" />`;
-                    }
-                    return match;
-                });
-                if (replaced) {
-                    el.dataset.agMemeRendered = 'true';
-                    el.innerHTML = newHtml;
-                }
+            if (replaceInlineMemesInElement(el, memeMap)) {
+                el.dataset.agMemeRendered = 'true';
             }
         });
     }
@@ -688,16 +868,45 @@
 
     ensureStyles();
     mountMemeButton();
-    renderChatMemes();
+    renderChatMemes(document);
 
-    setInterval(() => {
-        mountMemeButton();
-        renderChatMemes();
-    }, 1000);
+    initCustomMemesStorage().then(() => {
+        renderChatMemes(document);
+        if (pickerEl && currentPack === 'custom') {
+            renderPickerContent();
+        }
+    });
 
-    const obs = new MutationObserver(() => {
-        mountMemeButton();
-        renderChatMemes();
+    const pendingNodes = new Set();
+    let rafScheduled = false;
+
+    function flushPendingMutations() {
+        rafScheduled = false;
+        if (!document.getElementById('ag-meme-trigger-btn')) {
+            mountMemeButton();
+        }
+        pendingNodes.forEach(node => {
+            if (node.isConnected) {
+                renderChatMemes(node);
+            }
+        });
+        pendingNodes.clear();
+    }
+
+    const obs = new MutationObserver((mutations) => {
+        let hasWork = false;
+        for (const m of mutations) {
+            for (const added of m.addedNodes) {
+                if (added.nodeType === Node.ELEMENT_NODE) {
+                    pendingNodes.add(added);
+                    hasWork = true;
+                }
+            }
+        }
+        if (hasWork && !rafScheduled) {
+            rafScheduled = true;
+            requestAnimationFrame(flushPendingMutations);
+        }
     });
     obs.observe(document.body, { childList: true, subtree: true });
 })();

@@ -1,6 +1,6 @@
 {
   "name": "antigravity-meme-picker",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "A WeChat/QQ-style sticker and meme drawer extension for Google Antigravity.",
   "main": "dist/antigravity-meme-picker.bundle.js",
   "scripts": {
