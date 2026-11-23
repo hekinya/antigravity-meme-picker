@@ -61,6 +61,14 @@ if (Test-Path $targetJs) {
     $existing = Get-Content -Path $targetJs -Raw -Encoding UTF8
 }
 
+$legacyStartTag = "// === CASEY MEME INJECTOR START ==="
+$legacyEndTag = "// === CASEY MEME INJECTOR END ==="
+if ($existing.Contains($legacyStartTag) -and $existing.Contains($legacyEndTag)) {
+    $legacyRegex = "(?s)\r?\n?" + [regex]::Escape($legacyStartTag) + ".*?" + [regex]::Escape($legacyEndTag) + "\r?\n?"
+    $existing = [regex]::Replace($existing, $legacyRegex, "`n")
+    Write-Host "[!] 检测到历史旧版注入块，已自动清理迁移。" -ForegroundColor Yellow
+}
+
 $startTag = "// === AG_MEME_PICKER_START ==="
 $endTag = "// === AG_MEME_PICKER_END ==="
 $block = "`n`n$startTag`n$bundleContent`n$endTag`n"

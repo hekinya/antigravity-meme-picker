@@ -43,20 +43,20 @@
         const style = document.createElement('style');
         style.id = 'ag-meme-isolated-styles';
         style.textContent = `
-            .group\\/media:has(> div > img) {
+            .ag-chat-sticker {
                 width: fit-content !important;
                 max-width: 140px !important;
                 display: block !important;
                 margin: 6px 0 !important;
             }
-            .group\\/media:has(> div > img) > div:first-child {
+            .ag-chat-sticker > div:first-child {
                 max-width: 140px !important;
                 width: fit-content !important;
                 border: none !important;
                 background: transparent !important;
                 box-shadow: none !important;
             }
-            .group\\/media:has(> div > img) img {
+            .ag-chat-sticker img {
                 max-width: 140px !important;
                 max-height: 140px !important;
                 width: 140px !important;
@@ -65,8 +65,15 @@
                 object-fit: contain !important;
                 filter: drop-shadow(0 4px 10px rgba(0,0,0,0.35)) !important;
             }
-            .group\\/media:has(img[alt]) > div:last-child:not(:has(img)) {
+            .ag-chat-sticker > div:last-child:not(:has(img)) {
                 display: none !important;
+            }
+            .ag-chat-sticker > div:first-child button {
+                opacity: 0 !important;
+                transition: opacity 0.15s ease !important;
+            }
+            .ag-chat-sticker:hover > div:first-child button {
+                opacity: 1 !important;
             }
 
             #ag-meme-picker {
@@ -597,7 +604,21 @@
         if (!allMemes.length) return;
 
         const memeMap = {};
-        allMemes.forEach(m => memeMap[m.name] = m.preview);
+        const memeNames = new Set();
+        allMemes.forEach(m => {
+            memeMap[m.name] = m.preview;
+            memeNames.add(m.name);
+        });
+
+        document.querySelectorAll('[class*="group/media"]').forEach(mediaEl => {
+            if (mediaEl.classList.contains('ag-chat-sticker')) return;
+            const img = mediaEl.querySelector('img[alt]');
+            if (!img) return;
+            const alt = (img.getAttribute('alt') || '').trim();
+            if (memeNames.has(alt) || /^(?:表情|meme|sticker)[:：\s]/i.test(alt)) {
+                mediaEl.classList.add('ag-chat-sticker');
+            }
+        });
 
         const nodes = document.querySelectorAll('[data-testid="user-message-content"] .whitespace-pre-wrap, .whitespace-pre-wrap');
         nodes.forEach(el => {
