@@ -71,6 +71,12 @@ antigravity-meme-picker/
 
 ---
 
+## 📝 更新日志
+
+详细版本变更与修复记录请查看 [CHANGELOG.md](CHANGELOG.md)。
+
+---
+
 ## 📄 开源许可
 
 本项目基于 [MIT License](LICENSE) 开源。
