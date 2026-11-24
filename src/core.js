@@ -748,6 +748,9 @@
         const textNodes = [];
         let node;
         while ((node = walker.nextNode())) {
+            if (node.parentElement && node.parentElement.closest('code, pre, [data-lexical-editor="true"], #ag-meme-picker')) {
+                continue;
+            }
             if (node.nodeValue && node.nodeValue.includes('[表情:')) {
                 textNodes.push(node);
             }
@@ -814,14 +817,19 @@
             }
         });
 
-        const nodes = collectMatchingElements(rootEl, '.whitespace-pre-wrap');
+        const nodes = collectMatchingElements(
+            rootEl,
+            '.whitespace-pre-wrap, .prose p, .prose li, [class*="markdown"] p, [class*="markdown"] li'
+        );
         nodes.forEach(el => {
             if (el.dataset.agMemeRendered) return;
+            if (el.closest('code, pre, [data-lexical-editor="true"], #ag-meme-picker')) return;
             const text = el.textContent || '';
             if (!text.includes('[表情:')) return;
 
+            const hasCodeChild = !!el.querySelector('code, pre');
             const withoutMemes = text.replace(/\[表情:\s*([^\]]+)\]/g, '').trim();
-            if (!withoutMemes) {
+            if (!hasCodeChild && !withoutMemes) {
                 const matches = [...text.matchAll(/\[表情:\s*([^\]]+)\]/g)];
                 const validNames = matches.map(m => m[1].trim()).filter(name => memeMap[name]);
                 if (validNames.length === matches.length && validNames.length > 0) {
