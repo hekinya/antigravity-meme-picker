@@ -749,12 +749,17 @@
         return img;
     }
 
+    const EXCLUDED_SELECTOR = 'code, pre, textarea, input, script, style, noscript, [contenteditable="true"], [data-lexical-editor="true"], .monaco-editor, .cm-editor, #ag-meme-picker';
+
     function replaceInlineMemesInElement(el, memeMap) {
-        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+        const walkRoot = el === document ? document.body : el;
+        if (!walkRoot) return false;
+
+        const walker = document.createTreeWalker(walkRoot, NodeFilter.SHOW_TEXT, null);
         const textNodes = [];
         let node;
         while ((node = walker.nextNode())) {
-            if (node.parentElement && node.parentElement.closest('code, pre, [data-lexical-editor="true"], #ag-meme-picker')) {
+            if (node.parentElement && node.parentElement.closest(EXCLUDED_SELECTOR)) {
                 continue;
             }
             if (node.nodeValue && node.nodeValue.includes('[表情:')) {
@@ -823,13 +828,10 @@
             }
         });
 
-        const nodes = collectMatchingElements(
-            rootEl,
-            '.whitespace-pre-wrap, .prose p, .prose li, [class*="markdown"] p, [class*="markdown"] li'
-        );
-        nodes.forEach(el => {
-            if (el.dataset.agMemeRendered) return;
-            if (el.closest('code, pre, [data-lexical-editor="true"], #ag-meme-picker')) return;
+        // 1. Standalone pure-sticker bubbles (120px single / 96px multi)
+        const standaloneCandidates = collectMatchingElements(rootEl, '.whitespace-pre-wrap, p, li');
+        standaloneCandidates.forEach(el => {
+            if (el.closest(EXCLUDED_SELECTOR) || el.closest('button, nav')) return;
             const text = el.textContent || '';
             if (!text.includes('[表情:')) return;
 
@@ -839,7 +841,6 @@
                 const matches = [...text.matchAll(/\[表情:\s*([^\]]+)\]/g)];
                 const validNames = matches.map(m => m[1].trim()).filter(name => memeMap[name]);
                 if (validNames.length === matches.length && validNames.length > 0) {
-                    el.dataset.agMemeRendered = 'true';
                     const size = validNames.length === 1 ? 120 : 96;
                     const container = document.createElement('div');
                     container.className = 'ag-standalone-bubble-meme';
@@ -848,14 +849,12 @@
                         container.appendChild(createStickerImg(memeMap[name], name, size, false));
                     });
                     el.replaceChildren(container);
-                    return;
                 }
             }
-
-            if (replaceInlineMemesInElement(el, memeMap)) {
-                el.dataset.agMemeRendered = 'true';
-            }
         });
+
+        // 2. Inline mixed-text stickers across any chat/markdown container (selector-agnostic)
+        replaceInlineMemesInElement(rootEl, memeMap);
     }
 
     document.addEventListener('pointerdown', (e) => {
@@ -910,9 +909,19 @@
     const obs = new MutationObserver((mutations) => {
         let hasWork = false;
         for (const m of mutations) {
+            if (m.type === 'characterData') {
+                if (m.target.parentElement) {
+                    pendingNodes.add(m.target.parentElement);
+                    hasWork = true;
+                }
+                continue;
+            }
             for (const added of m.addedNodes) {
                 if (added.nodeType === Node.ELEMENT_NODE) {
                     pendingNodes.add(added);
+                    hasWork = true;
+                } else if (added.nodeType === Node.TEXT_NODE && m.target && m.target.nodeType === Node.ELEMENT_NODE) {
+                    pendingNodes.add(m.target);
                     hasWork = true;
                 }
             }
@@ -922,6 +931,6 @@
             requestAnimationFrame(flushPendingMutations);
         }
     });
-    obs.observe(document.body, { childList: true, subtree: true });
+    obs.observe(document.body, { childList: true, subtree: true, characterData: true });
 })();
 
