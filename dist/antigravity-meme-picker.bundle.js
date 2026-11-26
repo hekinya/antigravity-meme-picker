@@ -456,7 +456,9 @@
                 editor.focus();
                 const submitBtn = document.querySelector('[data-testid="input-submit-button"]') ||
                                   document.querySelector('button[aria-label="Send"]') ||
-                                  document.querySelector('button[aria-label="Submit"]');
+                                  document.querySelector('button[aria-label="Submit"]') ||
+                                  document.querySelector('button[aria-label="发送"]') ||
+                                  document.querySelector('button[aria-label="提交"]');
                 if (submitBtn && !submitBtn.disabled) {
                     submitBtn.click();
                 } else {
@@ -701,10 +703,24 @@
         setTimeout(() => searchInput.focus(), 50);
     }
 
+    function findAddContextButton() {
+        const direct = document.querySelector('button[aria-label="Add context"], button[aria-label="添加上下文"]');
+        if (direct) return direct;
+        const editor = document.querySelector('div[data-lexical-editor="true"]');
+        if (!editor) return null;
+        let container = editor.parentElement;
+        for (let i = 0; i < 6 && container; i++) {
+            const btn = container.querySelector('button[aria-haspopup], button[aria-label*="context" i], button[aria-label*="上下文"]');
+            if (btn) return btn;
+            container = container.parentElement;
+        }
+        return null;
+    }
+
     function mountMemeButton() {
         if (document.getElementById('ag-meme-trigger-btn')) return;
 
-        const addBtn = document.querySelector('button[aria-label="Add context"]');
+        const addBtn = findAddContextButton();
         if (!addBtn || !addBtn.parentElement) return;
 
         const btn = document.createElement('button');
@@ -726,14 +742,18 @@
     }
 
     function collectMatchingElements(root, selector) {
-        const list = [];
+        const set = new Set();
+        if (root.closest) {
+            const ancestor = root.closest(selector);
+            if (ancestor) set.add(ancestor);
+        }
         if (root.matches && root.matches(selector)) {
-            list.push(root);
+            set.add(root);
         }
         if (root.querySelectorAll) {
-            root.querySelectorAll(selector).forEach(el => list.push(el));
+            root.querySelectorAll(selector).forEach(el => set.add(el));
         }
-        return list;
+        return Array.from(set);
     }
 
     function createStickerImg(src, name, size, isInline) {
@@ -797,6 +817,65 @@
             }
         });
 
+        if ((el.textContent || '').includes('[表情:')) {
+            const allTextNodes = [];
+            const crossWalker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+            let tNode;
+            let combined = '';
+            while ((tNode = crossWalker.nextNode())) {
+                if (tNode.parentElement && tNode.parentElement.closest('code, pre, textarea, input, [contenteditable="true"], [data-lexical-editor="true"], #ag-meme-picker')) {
+                    continue;
+                }
+                const v = tNode.nodeValue || '';
+                if (!v) continue;
+                allTextNodes.push({ node: tNode, start: combined.length, end: combined.length + v.length });
+                combined += v;
+            }
+            if (allTextNodes.length > 0 && combined.includes('[表情:')) {
+                const matches = [];
+                tagRegex.lastIndex = 0;
+                let m;
+                while ((m = tagRegex.exec(combined)) !== null) {
+                    const name = m[1].trim();
+                    const src = memeMap[name];
+                    if (src) {
+                        matches.push({ start: m.index, end: m.index + m[0].length, name, src });
+                    }
+                }
+                for (let i = matches.length - 1; i >= 0; i--) {
+                    const { start, end, name, src } = matches[i];
+                    const touched = allTextNodes.filter(seg => seg.end > start && seg.start < end);
+                    if (!touched.length) continue;
+
+                    const first = touched[0];
+                    const last = touched[touched.length - 1];
+                    const prefix = first.node.nodeValue.slice(0, Math.max(0, start - first.start));
+                    const suffix = last.node.nodeValue.slice(Math.max(0, end - last.start));
+                    const img = createStickerImg(src, name, 52, true);
+
+                    if (first === last) {
+                        first.node.nodeValue = prefix;
+                        if (first.node.parentNode) {
+                            first.node.parentNode.insertBefore(img, first.node.nextSibling);
+                            if (suffix) {
+                                first.node.parentNode.insertBefore(document.createTextNode(suffix), img.nextSibling);
+                            }
+                        }
+                    } else {
+                        first.node.nodeValue = prefix;
+                        for (let k = 1; k < touched.length - 1; k++) {
+                            touched[k].node.nodeValue = '';
+                        }
+                        last.node.nodeValue = suffix;
+                        if (first.node.parentNode) {
+                            first.node.parentNode.insertBefore(img, first.node.nextSibling);
+                        }
+                    }
+                    replacedAny = true;
+                }
+            }
+        }
+
         return replacedAny;
     }
 
@@ -825,11 +904,10 @@
 
         const nodes = collectMatchingElements(
             rootEl,
-            '.whitespace-pre-wrap, .prose p, .prose li, [class*="markdown"] p, [class*="markdown"] li'
+            '.whitespace-pre-wrap, p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, summary'
         );
         nodes.forEach(el => {
-            if (el.dataset.agMemeRendered) return;
-            if (el.closest('code, pre, [data-lexical-editor="true"], #ag-meme-picker')) return;
+            if (el.closest('code, pre, textarea, input, [contenteditable="true"], [data-lexical-editor="true"], #ag-meme-picker')) return;
             const text = el.textContent || '';
             if (!text.includes('[表情:')) return;
 
@@ -856,6 +934,14 @@
                 el.dataset.agMemeRendered = 'true';
             }
         });
+
+        if (nodes.length === 0 && rootEl !== document && rootEl.nodeType === Node.ELEMENT_NODE) {
+            if (!rootEl.closest('code, pre, textarea, input, [contenteditable="true"], [data-lexical-editor="true"], #ag-meme-picker')) {
+                if ((rootEl.textContent || '').includes('[表情:')) {
+                    replaceInlineMemesInElement(rootEl, memeMap);
+                }
+            }
+        }
     }
 
     document.addEventListener('pointerdown', (e) => {
@@ -910,9 +996,17 @@
     const obs = new MutationObserver((mutations) => {
         let hasWork = false;
         for (const m of mutations) {
+            if (m.type === 'characterData' && m.target && m.target.parentElement) {
+                pendingNodes.add(m.target.parentElement);
+                hasWork = true;
+                continue;
+            }
             for (const added of m.addedNodes) {
                 if (added.nodeType === Node.ELEMENT_NODE) {
                     pendingNodes.add(added);
+                    hasWork = true;
+                } else if (added.nodeType === Node.TEXT_NODE && added.parentElement) {
+                    pendingNodes.add(added.parentElement);
                     hasWork = true;
                 }
             }
@@ -922,6 +1016,8 @@
             requestAnimationFrame(flushPendingMutations);
         }
     });
-    obs.observe(document.body, { childList: true, subtree: true });
+    obs.observe(document.body, { childList: true, subtree: true, characterData: true });
+    setTimeout(() => { mountMemeButton(); renderChatMemes(document); }, 800);
+    setTimeout(() => { mountMemeButton(); renderChatMemes(document); }, 2000);
 })();
 
