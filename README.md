@@ -26,16 +26,18 @@
 
 ## 🚀 快速安装
 
-### 方式一：Windows 一键安装（推荐）
+### 方式一：Windows 一键安装（推荐，开箱即用）
+
+> ⚠️ **说明**：原生 Antigravity 2.x 客户端默认不会自动加载 `resources\custom-theme\current.js`。如果你**尚未安装**其他自定义主题加载器，请直接运行 **`apply-custom-theme-loader.bat`**（需本机已安装 Node.js），它会自动注入 `current.js` 并在 `app.asar` 中挂载轻量级加载器、自动备份并重启客户端。
 
 1. 下载或克隆本项目：
    ```bash
-   git clone https://github.com/urlien/antigravity-meme-picker.git
+   git clone https://github.com/hekinya/antigravity-meme-picker.git
    cd antigravity-meme-picker
    ```
-2. 双击运行目录下的 **`install.bat`**（或右键运行 `install.ps1`）。
-3. 脚本会自动检测 Antigravity 安装路径并注入脚本。
-4. 重启或在 Antigravity 客户端中按 `Ctrl + R` 刷新即可生效！
+2. **首次安装 / 客户端自动更新后恢复**：双击运行 **`apply-custom-theme-loader.bat`**（会自动备份原 `app.asar` 为 `app.asar.pre-custom-theme.bak` 并重启客户端）。
+3. **仅更新表情包脚本（已装过加载器或第三方主题加载器）**：双击运行 **`install.bat`**（或右键运行 `install.ps1`），然后在 Antigravity 客户端中按 `Ctrl + R` 刷新即可生效！
+4. **如需卸载 / 还原 `app.asar`**：运行 `uninstall.bat` 清除表情包注入，或运行 `rollback-custom-theme-loader.bat` 一键还原 `app.asar`。
 
 ### 方式二：手动引入
 
